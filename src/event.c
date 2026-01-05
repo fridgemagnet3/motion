@@ -84,8 +84,10 @@ static void exec_command(struct context *cnt, char *command, char *filename, int
 {
     char stamp[PATH_MAX];
     mystrftime(cnt, stamp, sizeof(stamp), command, &cnt->current_image->timestamp_tv, filename, filetype);
-
-    if (!fork()) {
+    pid_t pid = fork() ;
+    int status ;
+    
+    if (!pid) {
 
         /* Detach from parent */
         setsid();
@@ -98,9 +100,10 @@ static void exec_command(struct context *cnt, char *command, char *filename, int
 
         exit(1);
     }
-
+    
     MOTION_LOG(DBG, TYPE_EVENTS, NO_ERRNO
         ,_("Executing external command '%s'"), stamp);
+    waitpid(pid,&status,0);
 }
 
 /*
