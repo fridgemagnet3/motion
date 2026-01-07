@@ -34,6 +34,8 @@
 #include "video_loopback.h"
 #include "video_common.h"
 #include "dbse.h"
+#include <pthread.h>
+#include <stdbool.h>
 
 /*
  * TODO Items:
@@ -72,6 +74,39 @@ const char *eventList[] = {
     "EVENT_LAST"
 };
 
+static pthread_t cmd_dispatch_thread_id ;
+static int pipefd[2] ;
+static bool thread_created = false ;
+
+static void *cmd_dispatch_thread(void *arg)
+{
+  char stamp[PATH_MAX];
+  
+  while(read(pipefd[0],stamp,sizeof(stamp))>0)
+  {
+    pid_t pid = fork() ;
+    int status ;
+    
+    if (!pid) 
+    {
+      /* Detach from parent */
+      setsid();
+
+      execl("/bin/sh", "sh", "-c", stamp, NULL);
+
+      /* if above function succeeds the program never reach here */
+      MOTION_LOG(ALR, TYPE_EVENTS, SHOW_ERRNO
+          ,_("Unable to start external command '%s'"), stamp);
+
+      exit(1);
+    }
+    
+    MOTION_LOG(DBG, TYPE_EVENTS, NO_ERRNO
+        ,_("Executing external command '%s'"), stamp);
+    waitpid(pid,&status,0);
+  }
+}
+
 /**
  * exec_command
  *      Execute 'command' with 'arg' as its argument.
@@ -82,28 +117,18 @@ const char *eventList[] = {
  */
 static void exec_command(struct context *cnt, char *command, char *filename, int filetype)
 {
-    char stamp[PATH_MAX];
-    mystrftime(cnt, stamp, sizeof(stamp), command, &cnt->current_image->timestamp_tv, filename, filetype);
-    pid_t pid = fork() ;
-    int status ;
-    
-    if (!pid) {
-
-        /* Detach from parent */
-        setsid();
-
-        execl("/bin/sh", "sh", "-c", stamp, " &", NULL);
-
-        /* if above function succeeds the program never reach here */
-        MOTION_LOG(ALR, TYPE_EVENTS, SHOW_ERRNO
-            ,_("Unable to start external command '%s'"), stamp);
-
-        exit(1);
+    if ( !thread_created )
+    {
+      pipe2(pipefd,O_DIRECT) ;
+      pthread_create(&cmd_dispatch_thread_id,NULL,cmd_dispatch_thread,NULL) ;  
+      thread_created = true ;
     }
     
-    MOTION_LOG(DBG, TYPE_EVENTS, NO_ERRNO
-        ,_("Executing external command '%s'"), stamp);
-    waitpid(pid,&status,0);
+    char stamp[PATH_MAX];
+    mystrftime(cnt, stamp, sizeof(stamp), command, &cnt->current_image->timestamp_tv, filename, filetype);
+    if ( write(pipefd[1],stamp,strlen(stamp)+1) < 0 )
+      MOTION_LOG(ALR, TYPE_EVENTS, SHOW_ERRNO
+          ,_("Failed to queue external command '%s'"), stamp);      
 }
 
 /*
