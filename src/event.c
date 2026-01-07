@@ -36,7 +36,6 @@
 #include "dbse.h"
 #include <pthread.h>
 #include <stdbool.h>
-#include <fcntl.h>
 
 /*
  * TODO Items:
@@ -123,10 +122,6 @@ static void exec_command(struct context *cnt, char *command, char *filename, int
     if ( !thread_created )
     {
       pipe2(pipefd,O_DIRECT) ;
-      // make write end of pipe non-blocking so if the dispatcher thread
-      // backs up (shouldn't happen!) possibly due to a badly behaved script
-      // we don't block here
-      fcntl(pipefd[1],F_SETFL,O_NONBLOCK);
       if ( !pthread_create(&cmd_dispatch_thread_id,NULL,cmd_dispatch_thread,NULL) ) 
         thread_created = true ;
       else
@@ -138,6 +133,8 @@ static void exec_command(struct context *cnt, char *command, char *filename, int
     {
       char stamp[PATH_MAX];
       mystrftime(cnt, stamp, sizeof(stamp), command, &cnt->current_image->timestamp_tv, filename, filetype);
+      MOTION_LOG(DBG, TYPE_EVENTS, NO_ERRNO
+           ,_("Queuing external command '%s'"), stamp);
       if ( write(pipefd[1],stamp,strlen(stamp)+1) < 0 )
         MOTION_LOG(ALR, TYPE_EVENTS, SHOW_ERRNO
           ,_("Failed to queue external command '%s'"), stamp); 
