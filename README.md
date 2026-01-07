@@ -1,3 +1,7 @@
+This fork incorporates a crude event queue which is designed to ensure that script events are serialized without stalling the main thread.
+
+At present there is only a single queue, so in a configuration with multiple cameras, this can add significant (unnecessary) delays executing the scripts. A potential improvement would be to implement a queue per camera. 
+
 Motion
 =============
 
