@@ -36,6 +36,7 @@
 #include "dbse.h"
 #include <pthread.h>
 #include <stdbool.h>
+#include <fcntl.h>
 
 /*
  * TODO Items:
@@ -78,6 +79,8 @@ static pthread_t cmd_dispatch_thread_id ;
 static int pipefd[2] ;
 static bool thread_created = false ;
 
+// thread used to dispatch events in order to ensure
+// they are serialised AND don't hold up the main thread
 static void *cmd_dispatch_thread(void *arg)
 {
   char stamp[PATH_MAX];
@@ -120,15 +123,25 @@ static void exec_command(struct context *cnt, char *command, char *filename, int
     if ( !thread_created )
     {
       pipe2(pipefd,O_DIRECT) ;
-      pthread_create(&cmd_dispatch_thread_id,NULL,cmd_dispatch_thread,NULL) ;  
-      thread_created = true ;
+      // make write end of pipe non-blocking so if the dispatcher thread
+      // backs up (shouldn't happen!) possibly due to a badly behaved script
+      // we don't block here
+      fcntl(pipefd[1],F_SETFL,O_NONBLOCK);
+      if ( !pthread_create(&cmd_dispatch_thread_id,NULL,cmd_dispatch_thread,NULL) ) 
+        thread_created = true ;
+      else
+        MOTION_LOG(ALR, TYPE_EVENTS, SHOW_ERRNO
+           ,_("Failed to create command dispatch thread"));      
     }
-    
-    char stamp[PATH_MAX];
-    mystrftime(cnt, stamp, sizeof(stamp), command, &cnt->current_image->timestamp_tv, filename, filetype);
-    if ( write(pipefd[1],stamp,strlen(stamp)+1) < 0 )
-      MOTION_LOG(ALR, TYPE_EVENTS, SHOW_ERRNO
-          ,_("Failed to queue external command '%s'"), stamp);      
+
+    if ( thread_created )
+    {
+      char stamp[PATH_MAX];
+      mystrftime(cnt, stamp, sizeof(stamp), command, &cnt->current_image->timestamp_tv, filename, filetype);
+      if ( write(pipefd[1],stamp,strlen(stamp)+1) < 0 )
+        MOTION_LOG(ALR, TYPE_EVENTS, SHOW_ERRNO
+          ,_("Failed to queue external command '%s'"), stamp); 
+    }
 }
 
 /*
